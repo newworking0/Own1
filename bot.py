@@ -259,7 +259,7 @@ async def lists_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ========== MAIN ==========
 
-async def main():
+def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start_handler))
@@ -270,8 +270,8 @@ async def main():
     app.add_handler(CommandHandler("remove", remove_handler))
     app.add_handler(CommandHandler("lists", lists_handler))
 
-    await app.run_polling()
+    print("🤖 Bot is running... Press Ctrl+C to stop.")
+    app.run_polling()
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    main()
