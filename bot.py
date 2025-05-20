@@ -83,6 +83,16 @@ def check_card_braintree(card_number, exp_month, exp_year, cvv):
 
 # ========== COMMAND HANDLERS ==========
 
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Welcome! I am your Credit Card Generator and Checker Bot.\n\n"
+        "Available commands:\n"
+        "/gen <bin> - Generate cards for a BIN\n"
+        "/chk <card> - Check a card (format: number|month|year|cvv)\n"
+        "/mass - Check multiple cards at once (up to 10, one per line)\n\n"
+        "Note: You must be approved to use commands. Contact the bot owner."
+    )
+
 async def gen_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_approved(user_id):
@@ -95,6 +105,10 @@ async def gen_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     bin_code = args[0]
+    if len(bin_code) < 6:
+        await update.message.reply_text("BIN must be at least 6 digits.")
+        return
+
     bin_info = await fetch_bin_info(bin_code)
     if not bin_info:
         await update.message.reply_text("Invalid or unsupported BIN.")
@@ -122,6 +136,13 @@ async def chk_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔍 Checking...")
     try:
         number, month, year, cvv = card.split("|")
+        if len(number) < 12 or len(month) not in (1,2) or len(year) not in (2,4) or len(cvv) not in (3,4):
+            raise ValueError("Invalid card parts length")
+
+        # Fix year format (support YY or YYYY)
+        if len(year) == 2:
+            year = "20" + year
+
         status, result = check_card_braintree(number, month, year, cvv)
         bin_info = await fetch_bin_info(number[:6])
         bank = bin_info.get('bank', {}).get('name','N/A')
@@ -144,8 +165,8 @@ Gateway: Stripe Auth
 Checked by: @{update.effective_user.username or 'User'}
 """
         await update.message.reply_text(msg)
-    except:
-        await update.message.reply_text("❌ Invalid card format.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Invalid card format or error: {e}")
 
 async def mass_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -165,6 +186,9 @@ async def mass_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for card in cards:
         try:
             number, month, year, cvv = card.split("|")
+            if len(year) == 2:
+                year = "20" + year
+
             status, result = check_card_braintree(number, month, year, cvv)
             bin_info = await fetch_bin_info(number[:6])
             brand = bin_info.get('scheme','').upper()
@@ -175,7 +199,7 @@ async def mass_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             prepaid = 'PREPAID' if bin_info.get('prepaid') else 'NOT PREPAID'
             msg = f"Card ↯ {card} → {'✅ Approved' if status == 'Approved' else '❌ Declined'} → {result}"
             replies.append(msg)
-        except:
+        except Exception:
             replies.append(f"{card} → Invalid Format ❌")
 
     replies.append(f"\nChecked by: @{update.effective_user.username or 'User'}")
@@ -233,6 +257,7 @@ async def lists_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("gen", gen_handler))
     app.add_handler(CommandHandler("chk", chk_handler))
     app.add_handler(CommandHandler("mass", mass_handler))
