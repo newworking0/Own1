@@ -3,14 +3,13 @@ import json
 import random
 import datetime
 import aiohttp
-import asyncio
 import braintree
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # ========== CONFIG ==========
-BOT_TOKEN = "7928470785:AAHMz54GOWoI-NsbD2zyj0Av_VbnqX7fYzI"  # Replace with your bot token
-OWNER_ID = 8179218740  # Replace with your Telegram ID
+BOT_TOKEN = "7928470785:AAHMz54GOWoI-NsbD2zyj0Av_VbnqX7fYzI"  # Apna bot token daalo
+OWNER_ID = 8179218740  # Apna Telegram ID daalo
 APPROVED_FILE = "approved.json"
 
 # ========== BRAINTREE CONFIG ==========
@@ -51,7 +50,7 @@ async def fetch_bin_info(bin_code):
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
                 return await response.json()
-            return None
+            return {}
 
 def generate_card(bin_code):
     cc_number = bin_code + ''.join(str(random.randint(0, 9)) for _ in range(16 - len(bin_code)))
@@ -86,11 +85,11 @@ def check_card_braintree(card_number, exp_month, exp_year, cvv):
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Welcome! I am your Credit Card Generator and Checker Bot.\n\n"
-        "Available commands:\n"
-        "/gen <bin> - Generate cards for a BIN\n"
+        "Commands:\n"
+        "/gen <bin> - Generate 10 cards for a BIN\n"
         "/chk <card> - Check a card (format: number|month|year|cvv)\n"
         "/mass - Check multiple cards at once (up to 10, one per line)\n\n"
-        "Note: You must be approved to use commands. Contact the bot owner."
+        "You must be approved to use commands. Contact the owner."
     )
 
 async def gen_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -132,24 +131,25 @@ async def chk_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /chk <cc>\nExample: /chk 4111111111111111|12|2026|123")
         return
 
-    card = args[0]
+    card = args[0].strip()
     await update.message.reply_text("🔍 Checking...")
     try:
-        number, month, year, cvv = card.split("|")
-        if len(number) < 12 or len(month) not in (1,2) or len(year) not in (2,4) or len(cvv) not in (3,4):
-            raise ValueError("Invalid card parts length")
+        parts = card.split("|")
+        if len(parts) != 4:
+            raise ValueError(f"Expected 4 parts but got {len(parts)}")
 
-        # Fix year format (support YY or YYYY)
+        number, month, year, cvv = [p.strip() for p in parts]
+
         if len(year) == 2:
             year = "20" + year
 
         status, result = check_card_braintree(number, month, year, cvv)
         bin_info = await fetch_bin_info(number[:6])
-        bank = bin_info.get('bank', {}).get('name','N/A')
-        country = bin_info.get('country', {}).get('name','N/A')
-        emoji = bin_info.get('country', {}).get('emoji','')
-        brand = bin_info.get('scheme','').upper()
-        card_type = bin_info.get('type','').upper()
+        bank = bin_info.get('bank', {}).get('name', 'N/A')
+        country = bin_info.get('country', {}).get('name', 'N/A')
+        emoji = bin_info.get('country', {}).get('emoji', '')
+        brand = bin_info.get('scheme', '').upper()
+        card_type = bin_info.get('type', '').upper()
         prepaid = 'PREPAID' if bin_info.get('prepaid') else 'NOT PREPAID'
 
         msg = f"""
@@ -185,22 +185,26 @@ async def mass_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for card in cards:
         try:
-            number, month, year, cvv = card.split("|")
+            parts = card.split("|")
+            if len(parts) != 4:
+                raise ValueError(f"Expected 4 parts but got {len(parts)}")
+            number, month, year, cvv = [p.strip() for p in parts]
+
             if len(year) == 2:
                 year = "20" + year
 
             status, result = check_card_braintree(number, month, year, cvv)
             bin_info = await fetch_bin_info(number[:6])
-            brand = bin_info.get('scheme','').upper()
-            bank = bin_info.get('bank', {}).get('name','N/A')
-            country = bin_info.get('country', {}).get('name','N/A')
-            emoji = bin_info.get('country', {}).get('emoji','')
-            card_type = bin_info.get('type','').upper()
+            brand = bin_info.get('scheme', '').upper()
+            bank = bin_info.get('bank', {}).get('name', 'N/A')
+            country = bin_info.get('country', {}).get('name', 'N/A')
+            emoji = bin_info.get('country', {}).get('emoji', '')
+            card_type = bin_info.get('type', '').upper()
             prepaid = 'PREPAID' if bin_info.get('prepaid') else 'NOT PREPAID'
             msg = f"Card ↯ {card} → {'✅ Approved' if status == 'Approved' else '❌ Declined'} → {result}"
             replies.append(msg)
-        except Exception:
-            replies.append(f"{card} → Invalid Format ❌")
+        except Exception as e:
+            replies.append(f"{card} → Invalid Format ❌ ({e})")
 
     replies.append(f"\nChecked by: @{update.effective_user.username or 'User'}")
     await update.message.reply_text("\n".join(replies))
@@ -237,7 +241,7 @@ async def remove_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_approved(data)
         await update.message.reply_text(f"✅ User {user_id} removed.")
     else:
-        await update.message.reply_text("❌ User not found.")
+        await update.message.reply_text("User not found.")
 
 async def lists_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
@@ -248,15 +252,16 @@ async def lists_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No approved users.")
         return
 
-    msg = "✅ Approved Users:\n"
+    msg = "Approved Users:\n"
     for user_id, expiry in data.items():
-        msg += f"- {user_id} → till {expiry}\n"
+        msg += f"ID: {user_id} | Expires on: {expiry}\n"
     await update.message.reply_text(msg)
 
 # ========== MAIN ==========
 
-def main():
+async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("gen", gen_handler))
     app.add_handler(CommandHandler("chk", chk_handler))
@@ -264,8 +269,9 @@ def main():
     app.add_handler(CommandHandler("add", add_handler))
     app.add_handler(CommandHandler("remove", remove_handler))
     app.add_handler(CommandHandler("lists", lists_handler))
-    print("🤖 Bot is running... Press Ctrl+C to stop.")
-    app.run_polling()
+
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
